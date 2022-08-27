@@ -204,4 +204,285 @@ contract SpaceStationV2 is EIP712, ISpaceStation {
         );
         emit EventClaimBatch(_cid, _dummyIdArr, nftIdArr, _starNFT, _mintTo);
     }
+function claimCapped(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256 _dummyId,
+        uint256 _powah,
+        uint256 _cap,
+        address _mintTo,
+        bytes calldata _signature
+    ) external payable override onlyNoPaused {
+        require(!hasMinted[_dummyId], "Already minted");
+        require(numMinted[_cid] < _cap, "Reached cap limit");
+        require(
+            _verify(
+                _hashCapped(_cid, _starNFT, _dummyId, _powah, _cap, _mintTo),
+                _signature
+            ),
+            "Invalid signature"
+        );
+        hasMinted[_dummyId] = true;
+        numMinted[_cid] = numMinted[_cid] + 1;
+        _payFees(_cid, 1);
+        uint256 nftID = _starNFT.mint(_mintTo, _powah);
+        uint256 minted = numMinted[_cid];
+        emit EventClaimCapped(_cid, _dummyId, nftID, _starNFT, _mintTo, minted, _cap);
+    }
+
+    function claimBatchCapped(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256[] calldata _dummyIdArr,
+        uint256[] calldata _powahArr,
+        uint256 _cap,
+        address _mintTo,
+        bytes calldata _signature
+    ) external payable override onlyNoPaused {
+        require(
+            _dummyIdArr.length > 0,
+            "Array(_dummyIdArr) should not be empty"
+        );
+        require(
+            _powahArr.length == _dummyIdArr.length,
+            "Array(_powahArr) length mismatch"
+        );
+        require(
+            numMinted[_cid] + _dummyIdArr.length <= _cap,
+            "Reached cap limit"
+        );
+
+        for (uint256 i = 0; i < _dummyIdArr.length; i++) {
+            require(!hasMinted[_dummyIdArr[i]], "Already minted");
+            hasMinted[_dummyIdArr[i]] = true;
+        }
+
+        require(
+            _verify(
+                _hashBatchCapped(
+                    _cid,
+                    _starNFT,
+                    _dummyIdArr,
+                    _powahArr,
+                    _cap,
+                    _mintTo
+                ),
+                _signature
+            ),
+            "Invalid signature"
+        );
+        numMinted[_cid] = numMinted[_cid] + _dummyIdArr.length;
+        _payFees(_cid, _dummyIdArr.length);
+        uint256[] memory nftIdArr = _starNFT.mintBatch(
+            _mintTo,
+            _powahArr.length,
+            _powahArr
+        );
+        uint256 minted = numMinted[_cid];
+        emit EventClaimBatchCapped(_cid, _dummyIdArr, nftIdArr, _starNFT, _mintTo, minted, _cap);
+    }
+
+    function forge(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256[] calldata _nftIDs,
+        uint256 _dummyId,
+        uint256 _powah,
+        address _mintTo,
+        bytes calldata _signature
+    ) external payable override onlyNoPaused {
+        require(!hasMinted[_dummyId], "Already minted");
+        require(
+            _verify(
+                _hashForge(
+                    _cid,
+                    _starNFT,
+                    _nftIDs,
+                    _dummyId,
+                    _powah,
+                    _mintTo
+                ),
+                _signature
+            ),
+            "Invalid signature"
+        );
+        hasMinted[_dummyId] = true;
+        for (uint256 i = 0; i < _nftIDs.length; i++) {
+            require(
+                _starNFT.isOwnerOf(_mintTo, _nftIDs[i]),
+                "Not the owner"
+            );
+        }
+        _starNFT.burnBatch(_mintTo, _nftIDs);
+        _payFees(_cid, 1);
+        uint256 nftID = _starNFT.mint(_mintTo, _powah);
+        emit EventForge(_cid, _dummyId, nftID, _starNFT, _mintTo);
+    }
+
+    receive() external payable {
+        // anonymous transfer: to treasury_manager
+        (bool success, ) = treasury_manager.call{value: msg.value}(
+            new bytes(0)
+        );
+        require(success, "Transfer failed");
+    }
+
+    fallback() external payable {
+        if (msg.value > 0) {
+            // call non exist function: send to treasury_manager
+            (bool success, ) = treasury_manager.call{value: msg.value}(new bytes(0));
+            require(success, "Transfer failed");
+        }
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Function that update galaxy signer address.
+     */
+    function updateGalaxySigner(address newAddress) external onlyManager {
+        require(
+            newAddress != address(0),
+            "Galaxy signer address must not be null address"
+        );
+        galaxy_signer = newAddress;
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Function that update galaxy signer address.
+     */
+    function updateCampaignSetter(address newAddress) external onlyManager {
+        require(
+            newAddress != address(0),
+            "Campaign setter address must not be null address"
+        );
+        campaign_setter = newAddress;
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Function that update manager address.
+     */
+    function updateManager(address newAddress) external onlyManager {
+        require(
+            newAddress != address(0),
+            "Manager address must not be null address"
+        );
+        manager = newAddress;
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Function that update treasure manager address.
+     */
+    function updateTreasureManager(address payable newAddress)
+        external
+        onlyTreasuryManager
+    {
+        require(
+            newAddress != address(0),
+            "Treasure manager must not be null address"
+        );
+        treasury_manager = newAddress;
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Function that pause the contract.
+     */
+    function setPause(bool _paused) external onlyManager {
+        paused = _paused;
+    }
+
+    /* ============ Internal Functions ============ */
+    function _hash(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256 _dummyId,
+        uint256 _powah,
+        address _account
+    ) private view returns (bytes32) {
+        return
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        keccak256(
+                            "NFT(uint256 cid,address starNFT,uint256 dummyId,uint256 powah,address account)"
+                        ),
+                        _cid,
+                        _starNFT,
+                        _dummyId,
+                        _powah,
+                        _account
+                    )
+                )
+            );
+    }
+
+    function _hashCapped(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256 _dummyId,
+        uint256 _powah,
+        uint256 _cap,
+        address _account
+    ) private view returns (bytes32) {
+        return
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        keccak256(
+                            "NFT(uint256 cid,address starNFT,uint256 dummyId,uint256 powah,uint256 cap,address account)"
+                        ),
+                        _cid,
+                        _starNFT,
+                        _dummyId,
+                        _powah,
+                        _cap,
+                        _account
+                    )
+                )
+            );
+    }
+
+    function _hashBatch(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256[] calldata _dummyIdArr,
+        uint256[] calldata _powahArr,
+        address _account
+    ) private view returns (bytes32) {
+        return
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        keccak256(
+                            "NFT(uint256 cid,address starNFT,uint256[] dummyIdArr,uint256[] powahArr,address account)"
+                        ),
+                        _cid,
+                        _starNFT,
+                        keccak256(abi.encodePacked(_dummyIdArr)),
+                        keccak256(abi.encodePacked(_powahArr)),
+                        _account
+                    )
+                )
+            );
+    }
+
+    /**
+     * Due to reason error bloat, internal functions are used to reduce bytecode size
+     */
+    function _validateOnlyCampaignSetter() internal view {
+        require(msg.sender == campaign_setter, "Only campaignSetter can call");
+    }
+
+    function _validateOnlyManager() internal view {
+        require(msg.sender == manager, "Only manager can call");
+    }
+
+    function _validateOnlyTreasuryManager() internal view {
+        require(
+            msg.sender == treasury_manager,
+            "Only treasury manager can call"
+        );
+    }
+
+    function _validateOnlyNotPaused() internal view {
+        require(!paused, "Contract paused");
+    }
 }
