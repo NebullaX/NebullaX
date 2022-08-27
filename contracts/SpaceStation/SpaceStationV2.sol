@@ -464,6 +464,136 @@ function claimCapped(
             );
     }
 
+    function _hashBatch(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256[] calldata _dummyIdArr,
+        uint256[] calldata _powahArr,
+        address _account
+    ) private view returns (bytes32) {
+        return
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        keccak256(
+                            "NFT(uint256 cid,address starNFT,uint256[] dummyIdArr,uint256[] powahArr,address account)"
+                        ),
+                        _cid,
+                        _starNFT,
+                        keccak256(abi.encodePacked(_dummyIdArr)),
+                        keccak256(abi.encodePacked(_powahArr)),
+                        _account
+                    )
+                )
+            );
+    }
+
+    function _hashBatchCapped(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256[] calldata _dummyIdArr,
+        uint256[] calldata _powahArr,
+        uint256 _cap,
+        address _account
+    ) private view returns (bytes32) {
+        return
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        keccak256(
+                            "NFT(uint256 cid,address starNFT,uint256[] dummyIdArr,uint256[] powahArr,uint256 cap,address account)"
+                        ),
+                        _cid,
+                        _starNFT,
+                        keccak256(abi.encodePacked(_dummyIdArr)),
+                        keccak256(abi.encodePacked(_powahArr)),
+                        _cap,
+                        _account
+                    )
+                )
+            );
+    }
+
+    function _hashForge(
+        uint256 _cid,
+        IStarNFT _starNFT,
+        uint256[] calldata _nftIDs,
+        uint256 _dummyId,
+        uint256 _powah,
+        address _account
+    ) private view returns (bytes32) {
+        return
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        keccak256(
+                            "NFT(uint256 cid,address starNFT,uint256[] nftIDs,uint256 dummyId,uint256 powah,address account)"
+                        ),
+                        _cid,
+                        _starNFT,
+                        keccak256(abi.encodePacked(_nftIDs)),
+                        _dummyId,
+                        _powah,
+                        _account
+                    )
+                )
+            );
+    }
+
+    function _verify(bytes32 hash, bytes calldata signature)
+        private
+        view
+        returns (bool)
+    {
+        return ECDSA.recover(hash, signature) == galaxy_signer;
+    }
+
+    function _setFees(
+        uint256 _cid,
+        uint256 _platformFee,
+        uint256 _erc20Fee,
+        address _erc20
+    ) private {
+        require(
+            (_erc20 == address(0) && _erc20Fee == 0) ||
+                (_erc20 != address(0) && _erc20Fee != 0),
+            "Invalid erc20 fee requirement arguments"
+        );
+        campaignFeeConfigs[_cid] = CampaignFeeConfig(
+            _erc20,
+            _erc20Fee,
+            _platformFee
+        );
+    }
+
+    function _payFees(uint256 _cid, uint256 amount) private {
+        require(amount > 0, "Must mint more than 0");
+        CampaignFeeConfig memory feeConf = campaignFeeConfigs[_cid];
+        // 1. pay platformFee if needed
+        if (feeConf.platformFee > 0) {
+            require(
+                msg.value >= feeConf.platformFee.mul(amount),
+                "Insufficient Payment"
+            );
+            (bool success, ) = treasury_manager.call{value: msg.value}(
+                new bytes(0)
+            );
+            require(success, "Transfer platformFee failed");
+        }
+        // 2. pay erc20_fee if needed
+        if (feeConf.erc20Fee > 0) {
+            // user wallet transfer <erc20> of <feeConf.erc20Fee> to <this contract>.
+            require(
+                IERC20(feeConf.erc20).transferFrom(
+                    msg.sender,
+                    treasury_manager,
+                    feeConf.erc20Fee.mul(amount)
+                ),
+                "Transfer erc20Fee failed"
+            );
+        }
+    }
+    
     /**
      * Due to reason error bloat, internal functions are used to reduce bytecode size
      */
