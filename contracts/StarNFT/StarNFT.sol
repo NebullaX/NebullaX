@@ -162,5 +162,99 @@ contract StarNFTV3 is ERC721, IStarNFT, Ownable {
         }
     }
 
-    
+    /* ============ External Getter Functions ============ */
+    function isOwnerOf(address account, uint256 id)
+        public
+        view
+        override
+        returns (bool)
+    {
+        address owner = ownerOf(id);
+        return owner == account;
+    }
+
+    function getNumMinted() external view override returns (uint256) {
+        return _starCount;
+    }
+
+    function tokenURI(uint256 id) public view override returns (string memory) {
+        require(id <= _starCount, "NFT does not exist");
+        if (bytes(baseURI()).length == 0) {
+            return "";
+        } else {
+            return string(abi.encodePacked(baseURI(), uint2str(id), ".json"));
+        }
+    }
+
+    /* ============ Internal Functions ============ */
+    /* ============ Private Functions ============ */
+    /* ============ Util Functions ============ */
+    /**
+     * PRIVILEGED MODULE FUNCTION. Sets a new baseURI for all token types.
+     */
+    function setURI(string memory newURI) external onlyOwner {
+        _setBaseURI(newURI);
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Sets a new transferable for all token types.
+     */
+    function setTransferable(bool _transferable) external onlyOwner {
+        transferable = _transferable;
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Sets a new name for all token types.
+     */
+    function setName(string memory _name) external onlyOwner {
+        _galaxyName = _name;
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Sets a new symbol for all token types.
+     */
+    function setSymbol(string memory _symbol) external onlyOwner {
+        _galaxySymbol = _symbol;
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Add a new minter.
+     */
+    function addMinter(address minter) external onlyOwner {
+        require(minter != address(0), "Minter must not be null address");
+        require(!minters[minter], "Minter already added");
+        minters[minter] = true;
+        emit EventMinterAdded(minter);
+    }
+
+    /**
+     * PRIVILEGED MODULE FUNCTION. Remove a old minter.
+     */
+    function removeMinter(address minter) external onlyOwner {
+        require(minters[minter], "Minter does not exist");
+        delete minters[minter];
+        emit EventMinterRemoved(minter);
+    }
+
+    function uint2str(uint256 _i) internal pure returns (string memory) {
+        if (_i == 0) {
+            return "0";
+        }
+        uint256 j = _i;
+        uint256 len;
+        while (j != 0) {
+            len++;
+            j /= 10;
+        }
+        bytes memory bStr = new bytes(len);
+        uint256 k = len;
+        while (_i != 0) {
+            k = k - 1;
+            uint8 temp = (48 + uint8(_i - (_i / 10) * 10));
+            bytes1 b1 = bytes1(temp);
+            bStr[k] = b1;
+            _i /= 10;
+        }
+        return string(bStr);
+    }
 }
