@@ -12,7 +12,7 @@ import "../../interfaces/IStarNFT.sol";
 /**
  * @dev Fork https://github.com/generalgalactic/ERC721S and implement IStarNFT interface
  */
-contract StarNFTV4 is Ownable, ERC165, IERC721, IERC721Metadata, IStarNFT {
+contract StarNFT is Ownable, ERC165, IERC721, IERC721Metadata, IStarNFT {
     using Address for address;
     using Strings for uint256;
 
@@ -477,7 +477,28 @@ contract StarNFTV4 is Ownable, ERC165, IERC721, IERC721Metadata, IStarNFT {
         emit Transfer(account, address(0), id);
     }
 
-    
+    function burnBatch(address account, uint256[] calldata ids)
+    external
+    override
+    onlyMinter
+    {
+        _burnCount += ids.length;
+        _balances[account] -= ids.length;
+        for (uint256 i = 0; i < ids.length; i++) {
+            uint256 tokenId = ids[i];
+            require(
+                _isApprovedOrOwner(_msgSender(), tokenId),
+                "StarNFT: caller is not approved or owner"
+            );
+            require(isOwnerOf(account, tokenId), "StarNFT: not owner");
+            // Clear approvals
+            _approve(address(0), tokenId);
+            _tokens[tokenId].owner = 0;
+            _tokens[tokenId].cid = 0;
+
+            emit Transfer(account, address(0), tokenId);
+        }
+    }
 
     /**
      * @dev Transfers `tokenId` from `from` to `to`.
