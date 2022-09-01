@@ -9,7 +9,9 @@ import "../../zeppelin-solidity/contracts/access/Ownable.sol";
 import "../../zeppelin-solidity//contracts/introspection/ERC165.sol";
 import "../../interfaces/IStarNFT.sol";
 
-
+/**
+ * @dev Fork https://github.com/generalgalactic/ERC721S and implement IStarNFT interface
+ */
 contract StarNFTV4 is Ownable, ERC165, IERC721, IERC721Metadata, IStarNFT {
     using Address for address;
     using Strings for uint256;
@@ -278,6 +280,75 @@ contract StarNFTV4 is Ownable, ERC165, IERC721, IERC721Metadata, IStarNFT {
     }
 
     /**
+     * @dev See {IERC721-setApprovalForAll}.
+     */
+    function setApprovalForAll(address operator, bool approved)
+    public
+    override
+    {
+        require(operator != _msgSender(), "ERC721: approve to caller");
+
+        _operatorApprovals[_msgSender()][operator] = approved;
+        emit ApprovalForAll(_msgSender(), operator, approved);
+    }
+
+    /**
+     * @dev See {IERC721-isApprovedForAll}.
+     */
+    function isApprovedForAll(address owner, address operator)
+    public
+    view
+    override
+    returns (bool)
+    {
+        return _operatorApprovals[owner][operator];
+    }
+
+    /**
+     * @dev See {IERC721-transferFrom}.
+     */
+    function transferFrom(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public onlyTransferable override {
+        //solhint-disable-next-line max-line-length
+        require(
+            _isApprovedOrOwner(_msgSender(), tokenId),
+            "ERC721: transfer caller is not owner nor approved"
+        );
+
+        _transfer(from, to, tokenId);
+    }
+
+    /**
+     * @dev See {IERC721-safeTransferFrom}.
+     */
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId
+    ) public onlyTransferable override {
+        safeTransferFrom(from, to, tokenId, "");
+    }
+
+    /**
+     * @dev See {IERC721-safeTransferFrom}.
+     */
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId,
+        bytes memory _data
+    ) public onlyTransferable override {
+        require(
+            _isApprovedOrOwner(_msgSender(), tokenId),
+            "ERC721: transfer caller is not owner nor approved"
+        );
+        _safeTransfer(from, to, tokenId, _data);
+    }
+
+    /**
      * @dev Safely transfers `tokenId` token from `from` to `to`, checking first that contract recipients
      * are aware of the ERC721 protocol to prevent tokens from being forever locked.
      *
@@ -361,6 +432,52 @@ contract StarNFTV4 is Ownable, ERC165, IERC721, IERC721Metadata, IStarNFT {
         emit Transfer(address(0), account, tokenId);
         return tokenId;
     }
+
+    function mintBatch(
+        address account,
+        uint256 amount,
+        uint256[] calldata cidArr
+    ) external override onlyMinter returns (uint256[] memory) {
+        require(account != address(0), "StarNFT: mint to the zero address");
+        uint256[] memory ids = new uint256[](amount);
+
+        _balances[account] += amount;
+
+        for (uint256 i = 0; i < ids.length; i++) {
+            uint256 tokenId = _tokens.length;
+            Star memory star = Star(uint160(account), uint96(cidArr[i]));
+            ids[i] = tokenId;
+            _tokens.push(star);
+
+            require(
+                _checkOnERC721Received(address(0), account, tokenId, ""),
+                "StarNFT: transfer to non ERC721Receiver implementer"
+            );
+
+            emit Transfer(address(0), account, tokenId);
+        }
+
+        return ids;
+    }
+
+    function burn(address account, uint256 id) external override onlyMinter {
+        require(
+            _isApprovedOrOwner(_msgSender(), id),
+            "StarNFT: caller is not approved or owner"
+        );
+        require(isOwnerOf(account, id), "StarNFT: not owner");
+
+        // Clear approvals
+        _approve(address(0), id);
+        _burnCount++;
+        _balances[account] -= 1;
+        _tokens[id].owner = 0;
+        _tokens[id].cid = 0;
+
+        emit Transfer(account, address(0), id);
+    }
+
+    
 
     /**
      * @dev Transfers `tokenId` from `from` to `to`.
