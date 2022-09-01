@@ -1,260 +1,494 @@
-pragma solidity >=0.7.6;
+pragma solidity 0.7.6;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "../interfaces/IStarNFT.sol";
+import "../../zeppelin-solidity/contracts/token/ERC721/IERC721.sol";
+import "../../zeppelin-solidity//contracts/token/ERC721/IERC721Receiver.sol";
+import "../../zeppelin-solidity//contracts/token/ERC721/IERC721Metadata.sol";
+import "../../zeppelin-solidity//contracts/utils/Address.sol";
+import "../../zeppelin-solidity//contracts/utils/Strings.sol";
+import "../../zeppelin-solidity/contracts/access/Ownable.sol";
+import "../../zeppelin-solidity//contracts/introspection/ERC165.sol";
+import "../../interfaces/IStarNFT.sol";
 
-contract StarNFTV3 is ERC721, IStarNFT, Ownable {
-    using SafeMath for uint256;
+
+contract StarNFTV4 is Ownable, ERC165, IERC721, IERC721Metadata, IStarNFT {
+    using Address for address;
+    using Strings for uint256;
+
+    /* ============ State Variables ============ */
+
+    struct Star {
+        uint160 owner;
+        uint96 cid; // Max value is 7.9E28, enough to store campaign id
+    }
+
+    // Token name
+    string private _name;
+
+    // Token symbol
+    string private _symbol;
+
+    // Total number of tokens burned
+    uint256 private _burnCount;
+
+    // Array of all tokens storing the owner's address and the campaign id
+    Star[] private _tokens;
+
+    // Mapping owner address to token count
+    mapping(address => uint256) private _balances;
+
+    // Mapping from token ID to approved address
+    mapping(uint256 => address) private _tokenApprovals;
+
+    // Mapping from owner to operator approvals
+    mapping(address => mapping(address => bool)) private _operatorApprovals;
+
+    // Mint and burn star.
+    mapping(address => bool) private _minters;
+
+    // Default allow transfer
+    bool private _transferable = true;
+
+    // Base token URI
+    string private _baseURI;
 
     /* ============ Events ============ */
+    // Add new minter
     event EventMinterAdded(address indexed newMinter);
+
+    // Remove old minter
     event EventMinterRemoved(address indexed oldMinter);
 
     /* ============ Modifiers ============ */
+
     /**
      * Only minter.
      */
     modifier onlyMinter() {
-        require(minters[msg.sender], "must be minter");
+        require(_minters[msg.sender], "StarNFT: must be minter");
         _;
     }
 
-    /* ============ Enums ================ */
-    /* ============ Structs ============ */
-    /* ============ State Variables ============ */
-
-    // Mint and burn star.
-    mapping(address => bool) public minters;
-    // Default allow transfer
-    bool public transferable = true;
-    // Star id to cid.
-    mapping(uint256 => uint256) private _cids;
-
-    uint256 private _starCount;
-    string private _galaxyName;
-    string private _galaxySymbol;
-
-    /* ============ Constructor ============ */
-    constructor() ERC721("", "") {}
-
     /**
-     * @dev See {IERC721-transferFrom}.
+     * Only allow transfer.
      */
-    function transferFrom(
-        address from,
-        address to,
-        uint256 tokenId
-    ) public override {
-        require(transferable, "disabled");
-        require(
-            _isApprovedOrOwner(_msgSender(), tokenId),
-            "ERC721: caller is not approved or owner"
-        );
-        _transfer(from, to, tokenId);
+    modifier onlyTransferable() {
+        require(_transferable, "StarNFT: must transferable");
+        _;
     }
 
     /**
-     * @dev See {IERC721-safeTransferFrom}.
+     * @dev Initializes the contract
      */
-    function safeTransferFrom(
-        address from,
-        address to,
-        uint256 tokenId
-    ) public override {
-        require(transferable, "disabled");
-        require(
-            _isApprovedOrOwner(_msgSender(), tokenId),
-            "ERC721: caller is not approved or owner"
-        );
-        safeTransferFrom(from, to, tokenId, "");
+    constructor() {
+        // Initialize zero index value
+        Star memory _star = Star(0, 0);
+        _tokens.push(_star);
     }
 
     /**
-     * @dev See {IERC721-safeTransferFrom}.
+     * @dev See {IERC165-supportsInterface}.
      */
-    function safeTransferFrom(
-        address from,
-        address to,
-        uint256 tokenId,
-        bytes memory _data
-    ) public override {
-        require(transferable, "disabled");
-        require(
-            _isApprovedOrOwner(_msgSender(), tokenId),
-            "ERC721: caller is not approved or owner"
-        );
-        _safeTransfer(from, to, tokenId, _data);
-    }
-
-    /**
-     * @dev See {IERC721Metadata-name}.
-     */
-    function name() public view override returns (string memory) {
-        return _galaxyName;
-    }
-
-    /**
-     * @dev See {IERC721Metadata-symbol}.
-     */
-    function symbol() public view override returns (string memory) {
-        return _galaxySymbol;
-    }
-
-    /**
-     * @dev Get Star NFT CID
-     */
-    function cid(uint256 tokenId) public view override returns (uint256) {
-        return _cids[tokenId];
-    }
-
-    /* ============ External Functions ============ */
-    function mint(address account, uint256 cid)
-        external
-        override
-        onlyMinter
-        returns (uint256)
+    function supportsInterface(bytes4 interfaceId)
+    public
+    view
+    override(ERC165, IERC165)
+    returns (bool)
     {
-        _starCount++;
-        uint256 sID = _starCount;
-
-        _mint(account, sID);
-        _cids[sID] = cid;
-        return sID;
+        return
+        interfaceId == type(IERC721).interfaceId ||
+        interfaceId == type(IERC721Metadata).interfaceId ||
+        interfaceId == type(IStarNFT).interfaceId ||
+        super.supportsInterface(interfaceId);
     }
 
-    function mintBatch(
-        address account,
-        uint256 amount,
-        uint256[] calldata cidArr
-    ) external override onlyMinter returns (uint256[] memory) {
-        uint256[] memory ids = new uint256[](amount);
-        for (uint256 i = 0; i < ids.length; i++) {
-            _starCount++;
-            ids[i] = _starCount;
-            _mint(account, ids[i]);
-            _cids[ids[i]] = cidArr[i];
-        }
-        return ids;
+    /**
+     * @dev Is this address a minters.
+     */
+    function minters(address account) public view returns (bool) {
+        return _minters[account];
     }
 
-    function burn(address account, uint256 id) external override onlyMinter {
-        require(
-            _isApprovedOrOwner(_msgSender(), id),
-            "ERC721: caller is not approved or owner"
-        );
-        _burn(id);
-        delete _cids[id];
+    /**
+     * @dev Is this contract allow nft transfer.
+     */
+    function transferable() public view returns (bool) {
+        return _transferable;
     }
 
-    function burnBatch(address account, uint256[] calldata ids)
-        external
-        override
-        onlyMinter
+    /**
+     * @dev Returns the base URI for nft.
+     */
+    function baseURI() public view returns (string memory) {
+        return _baseURI;
+    }
+
+    /**
+     * @dev Get Star NFT CID.
+     */
+    function cid(uint256 tokenId) public view returns (uint256) {
+        require(_exists(tokenId), "StarNFT: StarNFT does not exist");
+        return _tokens[tokenId].cid;
+    }
+
+    /**
+     * @dev Get Star NFT owner
+     */
+    function getNumMinted() public view override returns (uint256) {
+        return _tokens.length-1;
+    }
+
+    /**
+     * @dev See {IERC721Enumerable-totalSupply}.
+     */
+    function totalSupply() public view returns (uint256) {
+        return getNumMinted() - _burnCount;
+    }
+
+    /**
+     * @dev See {IERC721Enumerable-tokenOfOwnerByIndex}.
+     * This is implementation is O(n) and should not be
+     * called by other contracts.
+     */
+    function tokenOfOwnerByIndex(address owner, uint256 index)
+    public
+    view
+    returns (uint256)
     {
-        for (uint256 i = 0; i < ids.length; i++) {
-            require(
-                _isApprovedOrOwner(_msgSender(), ids[i]),
-                "ERC721: caller is not approved or owner"
-            );
-            _burn(ids[i]);
-            delete _cids[ids[i]];
+        uint256 currentIndex = 0;
+        for (uint256 i = 1; i < _tokens.length; i++) {
+            if (isOwnerOf(owner, i)) {
+                if (currentIndex == index) {
+                    return i;
+                }
+                currentIndex += 1;
+            }
         }
+        revert("ERC721Enumerable: owner index out of bounds");
     }
 
-    /* ============ External Getter Functions ============ */
+    /**
+     * @dev See {IERC721-balanceOf}.
+     */
+    function balanceOf(address owner)
+    public
+    view
+    override
+    returns (uint256)
+    {
+        require(
+            owner != address(0),
+            "ERC721: balance query for the zero address"
+        );
+        return _balances[owner];
+    }
+
+    /**
+     * @dev See {IERC721-ownerOf}.
+     */
+    function ownerOf(uint256 tokenId)
+    public
+    view
+    override
+    returns (address)
+    {
+        require(
+            _exists(tokenId),
+            "ERC721: owner query for nonexistent token"
+        );
+        return address(_tokens[tokenId].owner);
+    }
+
+    /**
+     * @dev See {IStarNFT-isOwnerOf}.
+     */
     function isOwnerOf(address account, uint256 id)
-        public
-        view
-        override
-        returns (bool)
+    public
+    view
+    override
+    returns (bool)
     {
         address owner = ownerOf(id);
         return owner == account;
     }
 
-    function getNumMinted() external view override returns (uint256) {
-        return _starCount;
+    /**
+     * @dev See {IERC721Metadata-name}.
+     */
+    function name() public view virtual override returns (string memory) {
+        return _name;
     }
 
-    function tokenURI(uint256 id) public view override returns (string memory) {
-        require(id <= _starCount, "NFT does not exist");
-        if (bytes(baseURI()).length == 0) {
-            return "";
-        } else {
-            return string(abi.encodePacked(baseURI(), uint2str(id), ".json"));
+    /**
+     * @dev See {IERC721Metadata-symbol}.
+     */
+    function symbol() public view virtual override returns (string memory) {
+        return _symbol;
+    }
+
+    /**
+     * @dev See {IERC721Metadata-tokenURI}.
+     */
+    function tokenURI(uint256 tokenId)
+    public
+    view
+    override
+    returns (string memory)
+    {
+        require(
+            _exists(tokenId),
+            "ERC721Metadata: URI query for nonexistent token"
+        );
+
+        return
+        bytes(_baseURI).length > 0
+        ? string(abi.encodePacked(_baseURI, tokenId.toString(), ".json"))
+        : "";
+    }
+
+    /**
+     * @dev See {IERC721-approve}.
+     */
+    function approve(address to, uint256 tokenId) public override {
+        address owner = ownerOf(tokenId);
+        require(to != owner, "ERC721: approval to current owner");
+
+        require(
+            _msgSender() == owner || isApprovedForAll(owner, _msgSender()),
+            "ERC721: approve caller is not owner nor approved for all"
+        );
+
+        _approve(to, tokenId);
+    }
+
+    /**
+     * @dev See {IERC721-getApproved}.
+     */
+    function getApproved(uint256 tokenId)
+    public
+    view
+    override
+    returns (address)
+    {
+        require(
+            _exists(tokenId),
+            "ERC721: approved query for nonexistent token"
+        );
+
+        return _tokenApprovals[tokenId];
+    }
+
+    /**
+     * @dev Safely transfers `tokenId` token from `from` to `to`, checking first that contract recipients
+     * are aware of the ERC721 protocol to prevent tokens from being forever locked.
+     *
+     * `_data` is additional data, it has no specified format and it is sent in call to `to`.
+     *
+     * This internal function is equivalent to {safeTransferFrom}, and can be used to e.g.
+     * implement alternative mechanisms to perform token transfer, such as signature-based.
+     *
+     * Requirements:
+     *
+     * - `from` cannot be the zero address.
+     * - `to` cannot be the zero address.
+     * - `tokenId` token must exist and be owned by `from`.
+     * - If `to` refers to a smart contract, it must implement {IERC721Receiver-onERC721Received}, which is called upon a safe transfer.
+     *
+     * Emits a {Transfer} event.
+     */
+    function _safeTransfer(
+        address from,
+        address to,
+        uint256 tokenId,
+        bytes memory _data
+    ) internal {
+        _transfer(from, to, tokenId);
+        require(
+            _checkOnERC721Received(from, to, tokenId, _data),
+            "ERC721: transfer to non ERC721Receiver implementer"
+        );
+    }
+
+    /**
+     * @dev Returns whether `tokenId` exists.
+     *
+     * Tokens can be managed by their owner or approved accounts via {approve} or {setApprovalForAll}.
+     *
+     * Tokens start existing when they are minted (`_mint`),
+     * and stop existing when they are burned (`_burn`).
+     */
+    function _exists(uint256 tokenId) internal view returns (bool) {
+        return tokenId > 0 && tokenId <= getNumMinted() && _tokens[tokenId].owner != 0x0;
+    }
+
+    /**
+     * @dev Returns whether `spender` is allowed to manage `tokenId`.
+     *
+     * Requirements:
+     *
+     * - `tokenId` must exist.
+     */
+    function _isApprovedOrOwner(address spender, uint256 tokenId)
+    internal
+    view
+    returns (bool)
+    {
+        address owner = ownerOf(tokenId);
+        return (spender == owner ||
+        getApproved(tokenId) == spender ||
+        isApprovedForAll(owner, spender));
+    }
+
+    /* ============ External Functions ============ */
+    function mint(address account, uint256 cid)
+    external
+    override
+    onlyMinter
+    returns (uint256)
+    {
+        require(account != address(0), "StarNFT: mint to the zero address");
+
+        uint256 tokenId = _tokens.length;
+        Star memory star = Star(uint160(account), uint96(cid));
+
+        _balances[account] += 1;
+        _tokens.push(star);
+
+        require(
+            _checkOnERC721Received(address(0), account, tokenId, ""),
+            "StarNFT: transfer to non ERC721Receiver implementer"
+        );
+
+        emit Transfer(address(0), account, tokenId);
+        return tokenId;
+    }
+
+    /**
+     * @dev Transfers `tokenId` from `from` to `to`.
+     *  As opposed to {transferFrom}, this imposes no restrictions on msg.sender.
+     *
+     * Requirements:
+     *
+     * - `to` cannot be the zero address.
+     * - `tokenId` token must be owned by `from`.
+     *
+     * Emits a {Transfer} event.
+     */
+    function _transfer(
+        address from,
+        address to,
+        uint256 tokenId
+    ) internal virtual {
+        require(
+            isOwnerOf(from, tokenId),
+            "ERC721: transfer of token that is not own"
+        );
+        require(to != address(0), "ERC721: transfer to the zero address");
+
+        // Clear approvals from the previous owner
+        _approve(address(0), tokenId);
+        _balances[from] -= 1;
+        _balances[to] += 1;
+        _tokens[tokenId].owner = uint160(to);
+
+        emit Transfer(from, to, tokenId);
+    }
+
+    /**
+     * @dev Approve `to` to operate on `tokenId`
+     *
+     * Emits a {Approval} event.
+     */
+    function _approve(address to, uint256 tokenId) internal virtual {
+        _tokenApprovals[tokenId] = to;
+        emit Approval(ownerOf(tokenId), to, tokenId);
+    }
+
+    /**
+     * @dev Internal function to invoke {IERC721Receiver-onERC721Received} on a target address.
+     * The call is not executed if the target address is not a contract.
+     *
+     * @param from address representing the previous owner of the given token ID
+     * @param to target address that will receive the tokens
+     * @param tokenId uint256 ID of the token to be transferred
+     * @param _data bytes optional data to send along with the call
+     * @return bool whether the call correctly returned the expected magic value
+     */
+    function _checkOnERC721Received(
+        address from,
+        address to,
+        uint256 tokenId,
+        bytes memory _data
+    ) private returns (bool) {
+        if (to.isContract()) {
+            try
+            IERC721Receiver(to).onERC721Received(
+                _msgSender(),
+                from,
+                tokenId,
+                _data
+            )
+            returns (bytes4 retval) {
+                return retval == IERC721Receiver.onERC721Received.selector;
+            } catch (bytes memory reason) {
+                if (reason.length == 0) {
+                    revert(
+                    "ERC721: transfer to non ERC721Receiver implementer"
+                    );
+                } else {
+                    assembly {
+                        revert(add(32, reason), mload(reason))
+                    }
+                }
+            }
         }
+        return true;
     }
 
-    /* ============ Internal Functions ============ */
-    /* ============ Private Functions ============ */
     /* ============ Util Functions ============ */
     /**
-     * PRIVILEGED MODULE FUNCTION. Sets a new baseURI for all token types.
+     * @dev Sets a new baseURI for all token types.
      */
-    function setURI(string memory newURI) external onlyOwner {
-        _setBaseURI(newURI);
+    function setURI(string calldata newURI) external onlyOwner {
+        _baseURI = newURI;
     }
 
     /**
-     * PRIVILEGED MODULE FUNCTION. Sets a new transferable for all token types.
+     * @dev Sets a new transferable for all token types.
      */
-    function setTransferable(bool _transferable) external onlyOwner {
-        transferable = _transferable;
+    function setTransferable(bool transferable) external onlyOwner {
+        _transferable = transferable;
     }
 
     /**
-     * PRIVILEGED MODULE FUNCTION. Sets a new name for all token types.
+     * @dev Sets a new name for all token types.
      */
-    function setName(string memory _name) external onlyOwner {
-        _galaxyName = _name;
+    function setName(string calldata newName) external onlyOwner {
+        _name = newName;
     }
 
     /**
-     * PRIVILEGED MODULE FUNCTION. Sets a new symbol for all token types.
+     * @dev Sets a new symbol for all token types.
      */
-    function setSymbol(string memory _symbol) external onlyOwner {
-        _galaxySymbol = _symbol;
+    function setSymbol(string calldata newSymbol) external onlyOwner {
+        _symbol = newSymbol;
     }
 
     /**
-     * PRIVILEGED MODULE FUNCTION. Add a new minter.
+     * @dev Add a new minter.
      */
     function addMinter(address minter) external onlyOwner {
-        require(minter != address(0), "Minter must not be null address");
-        require(!minters[minter], "Minter already added");
-        minters[minter] = true;
+        require(minter != address(0), "minter must not be null address");
+        require(!_minters[minter], "minter already added");
+        _minters[minter] = true;
         emit EventMinterAdded(minter);
     }
 
     /**
-     * PRIVILEGED MODULE FUNCTION. Remove a old minter.
+     * @dev Remove a old minter.
      */
     function removeMinter(address minter) external onlyOwner {
-        require(minters[minter], "Minter does not exist");
-        delete minters[minter];
+        require(_minters[minter], "minter does not exist");
+        delete _minters[minter];
         emit EventMinterRemoved(minter);
-    }
-
-    function uint2str(uint256 _i) internal pure returns (string memory) {
-        if (_i == 0) {
-            return "0";
-        }
-        uint256 j = _i;
-        uint256 len;
-        while (j != 0) {
-            len++;
-            j /= 10;
-        }
-        bytes memory bStr = new bytes(len);
-        uint256 k = len;
-        while (_i != 0) {
-            k = k - 1;
-            uint8 temp = (48 + uint8(_i - (_i / 10) * 10));
-            bytes1 b1 = bytes1(temp);
-            bStr[k] = b1;
-            _i /= 10;
-        }
-        return string(bStr);
     }
 }
